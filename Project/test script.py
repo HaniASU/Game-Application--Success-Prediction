@@ -43,20 +43,25 @@ def feature_selection_classification(X):
     return X[final_selected_cols]
 
 
-preprocessing_cols = load_parameter(f'{paths[0]}preprocessing_regression')
+preprocessing_cols = load_parameter(f'{paths[0]}preprocessing_dict')
+drop_cols_class = preprocessing_cols['drop columns']
+
+drop_cols = preprocessing_cols['drop columns']
+drop_cols.remove('Rate')
+drop_cols_reg = drop_cols + ['Average User Rating']
 
 
 # Regression task
 
 # Read data as csv file
-data_regression = pd.read_csv("games-regression-dataset.csv")
+data_regression = pd.read_csv("datasets/games-regression-dataset.csv")
 
 # Clean Row that has no value in target column
 data_regression = data_regression.dropna(axis=0, how="any", subset="Average User Rating", inplace=False)
 
 # Get X ad Y for regression
 Y_reg = data_regression["Average User Rating"]
-X_reg = data_regression.drop(columns=preprocessing_cols['drop columns'])
+X_reg = data_regression.drop(columns=drop_cols_reg)
 
 # Apply preprocessing in X data
 for column, value in preprocessing_cols['Null values columns'].items():
@@ -76,11 +81,11 @@ X_reg = feature_selection_regression(X_reg)
 data_classification = pd.read_csv("datasets/games-classification-dataset.csv")
 
 # Clean Row that has no value in target column
-data_classification = data_classification.dropna(axis=0, how="any", subset="Average User Rating", inplace=False)
+data_classification = data_classification.dropna(axis=0, how="any", subset="Rate", inplace=False)
 
 # Get X ad Y for classification
-Y_class = data_classification["Average User Rating"]
-X_class = data_classification.drop(columns=preprocessing_cols['drop columns'])
+Y_class = data_classification["Rate"]
+X_class = data_classification.drop(columns=drop_cols_class)
 
 # Apply preprocessing in X data
 for column, value in preprocessing_cols['Null values columns'].items():

@@ -233,7 +233,7 @@ def task_type(X, Y_train=None, type_technique='regression', type_data='train', d
 
         X = replace_null_values(X, type=type_data)
         Numerical_cols = X.select_dtypes(exclude=['object']).columns.tolist()
-        save_parameter(f'{paths[0]}preprocessing_{task[0]}', dict)
+        save_parameter(f'{paths[0]}preprocessing_dict', dict)
         X = one_hot_encoding(X, type=type_data)
         Categorical_cols = [x for x in X.columns.tolist() if x not in Numerical_cols]
         X = features_scaling(X, type=type_data)
@@ -242,13 +242,11 @@ def task_type(X, Y_train=None, type_technique='regression', type_data='train', d
             X = features_selection_regression(X, Y_train, type=type_data,
                                               numerical_features=X[Numerical_cols],
                                               categorical_features=X[Categorical_cols])
-            save_parameter(f'{paths[0]}preprocessing_{type_technique}', dict)
 
         elif type_technique == 'classification':
             X = features_selection_classification(X, Y_train, type=type_data,
                                                   numerical_features=X[Numerical_cols],
                                                   categorical_features=X[Categorical_cols])
-            save_parameter(f'{paths[0]}preprocessing_{type_technique}', dict)
 
     else:
 
