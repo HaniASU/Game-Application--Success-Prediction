@@ -5,10 +5,10 @@ import datetime as dt
 import pandas as pd
 from scipy.stats import zscore
 from sklearn.feature_selection import SelectKBest, f_regression, f_classif, mutual_info_classif
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error,r2_score
 import seaborn as sns
 from sklearn.svm import SVR
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import pickle
 import os
@@ -78,8 +78,8 @@ def replace_null_values(X, type='train'):
     X = date_to_numeric(X, date_cols)
 
     if (type == 'train'):
-        X = fill_outliers(X, 'User Rating Count', 5)  # detect outliers in dat with Z score 5
-        X = fill_outliers(X, 'Price', 5)
+        X = fill_outliers(X, 'User Rating Count', 3)  # detect outliers in dat with Z score 5
+        X = fill_outliers(X, 'Price', 3)
 
         languages = X['Languages'].str.split(', ').explode()
         frequent_languages = languages.value_counts(normalize=True, dropna=True)
@@ -137,17 +137,19 @@ def one_hot_encoding(X, type='train'):
     return X
 
 # Apply Feature Scaling
-def features_scaling(X, type='train'):
+def features_scaling(X, cols, type='train'):
     if type == 'train':
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        scaler_model = scaler.fit(X)
-        scaled_data = scaler_model.transform(X)
+        scaler = StandardScaler()
+        scaler_model = scaler.fit(X[cols])
+        scaled_data = scaler_model.transform(X[cols])
         save_parameter(f'{paths[0]}scaler_model', scaler_model)
     else:
         scaler_model = load_parameter(f'{paths[0]}scaler_model')
-        scaled_data = scaler_model.transform(X)
+        scaled_data = scaler_model.transform(X[cols])
+    df = pd.DataFrame(scaled_data, columns=cols)
 
-    X = pd.DataFrame(scaled_data, columns=X.columns)
+    for i in df:
+        X.loc[:, i] = df[i].tolist()
 
     return X
 
@@ -177,7 +179,6 @@ def anova(X_features, Y_train=None, type=f_regression, K=34):
 
 # Apply Regression features selection using Anova and Correlation on data
 def features_selection_regression(X, y_train=None, type='train', numerical_features=None, categorical_features=None):
-    cols_selection = []
     if type == 'train':
 
         # Correlation
@@ -206,7 +207,6 @@ def features_selection_regression(X, y_train=None, type='train', numerical_featu
 
 # Apply Classification features selection using Anova and Mutual information on data
 def features_selection_classification(X, y_train=None, type='train', numerical_features=None, categorical_features=None, K_anova=3, K_mut=34):
-    cols_selection = []
     if type == 'train':
         # Anova
         anova_cols = anova(numerical_features, Y_train=y_train,type=f_classif, K=K_anova)
@@ -227,16 +227,15 @@ def features_selection_classification(X, y_train=None, type='train', numerical_f
     return X
 
 # Apply Regression or Classification
-def task_type(X, Y_train=None, type_technique='regression', type_data='train', dict=None):
+def task_type(X, Y_train=None, type_technique='regression', type_data='train', dict=None, Numerical_cols=None):
 
     if type_data == 'train':
 
         X = replace_null_values(X, type=type_data)
-        Numerical_cols = X.select_dtypes(exclude=['object']).columns.tolist()
         save_parameter(f'{paths[0]}preprocessing_dict', dict)
         X = one_hot_encoding(X, type=type_data)
         Categorical_cols = [x for x in X.columns.tolist() if x not in Numerical_cols]
-        X = features_scaling(X, type=type_data)
+        X = features_scaling(X, Numerical_cols, type=type_data)
 
         if type_technique == 'regression':
             X = features_selection_regression(X, Y_train, type=type_data,
@@ -252,7 +251,7 @@ def task_type(X, Y_train=None, type_technique='regression', type_data='train', d
 
         X = replace_null_values(X, type=type_data)
         X = one_hot_encoding(X, type=type_data)
-        X = features_scaling(X, type=type_data)
+        X = features_scaling(X, Numerical_cols, type=type_data)
 
         if type_technique == 'regression':
             X = features_selection_regression(X, type=type_data)
@@ -268,14 +267,12 @@ preprocessing_dict = {}
 
 # Read data as csv file
 regression_data = pd.read_csv("datasets/games-regression-dataset.csv")
-classification_data = pd.read_csv("datasets/games-classification-dataset.csv")
 
 # Clean Row that has no value in target column
 regression_data = regression_data.dropna(axis=0, how="any", subset="Average User Rating", inplace=False)
-classification_data = classification_data.dropna(axis=0, how="any", subset="Rate", inplace=False)
 
 Y_reg = regression_data["Average User Rating"]
-Y_class = classification_data["Rate"]
+
 
 # Get columns that percentage of unique values in each column greater than 55%
 info_unique_cols = regression_data.nunique().multiply(other=100 / regression_data.shape[0])
@@ -294,9 +291,8 @@ preprocessing_dict['drop columns'] = drop_cols          # Add drop columns to pr
 
 # Drop some columns from data
 X_reg = regression_data.drop(columns=drop_cols)
-index = drop_cols.index("Average User Rating")
-drop_cols[index] = "Rate"
-X_class = classification_data.drop(columns=drop_cols)
+Numerical_cols = X_reg.select_dtypes(exclude=['object']).columns.tolist() +['Original Release Date','Current Version Release Date']
+
 
 # # visualization of some columns based on target column
 # visualize_data(Y,X,'User Rating Count','Average User Rating')
@@ -309,18 +305,29 @@ X_class = classification_data.drop(columns=drop_cols)
 # sns.pairplot(data = X.join(Y), height = 20)
 
 
+
 # Spilt data into train and test
-X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(X_reg, Y_reg, test_size=0.20, shuffle=True, random_state=10)
-X_train_class, X_test_class, y_train_class, y_test_class = train_test_split(X_class, Y_class, test_size=0.20, shuffle=True, random_state=10)
+X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(X_reg, Y_reg, test_size=0.20, shuffle=True, random_state=8)
 
 task = ['regression', 'classification']
 
 # Apply preprocessing in train and test data
-X_train_regression = task_type(X_train_reg, Y_train=y_train_reg, type_technique=task[0], type_data='train', dict=preprocessing_dict)
-X_test_regression = task_type(X_test_reg, type_technique=task[0], type_data='test', dict=preprocessing_dict)
+X_train_reg = task_type(X_train_reg, Y_train=y_train_reg, type_technique=task[0], type_data='train',
+                        dict=preprocessing_dict, Numerical_cols=Numerical_cols)
+X_test_reg = task_type(X_test_reg, type_technique=task[0], type_data='test', dict=preprocessing_dict, Numerical_cols=Numerical_cols)
 
-X_train_classification = task_type(X_train_class, Y_train=y_train_class, type_technique=task[1], type_data='train', dict=preprocessing_dict)
-X_test_classification = task_type(X_test_class, type_technique=task[1], type_data='test', dict=preprocessing_dict)
+# from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+# poly_features = PolynomialFeatures(degree=3)
+# X_train_poly = poly_features.fit_transform(X_train_reg)
+# poly_model = LinearRegression()
+# poly_model.fit(X_train_poly, y_train_reg)
+#
+# y_train_predicted = poly_model.predict(X_train_poly)
+#
+# y_predict = poly_model.predict(poly_features.transform(X_test_reg))
+# print('Mean Square Error Train', r2_score(y_train_reg, y_train_predicted))
+# print('Mean Square Error Test', r2_score(y_test_reg, y_predict))
+
 
 # Apply some models
 svr = SVR(kernel='rbf')
@@ -331,11 +338,29 @@ ridge = Ridge(alpha=0.1)
 models = [svr, lasso, linear, ridge]
 
 for name in models:
-    model = name.fit(X_train_regression, y_train_reg)
+    model = name.fit(X_train_reg, y_train_reg)
     save_parameter(f'{paths[1]}{model}', model)
-    train_pred_ = model.predict(X_train_regression)
-    test_pred_ = model.predict(X_test_regression)
+    train_pred_ = model.predict(X_train_reg)
+    test_pred_ = model.predict(X_test_reg)
     plot(y_train_reg, train_pred_, str(model))
     plot(y_test_reg, test_pred_, str(model))
     print(f'Mean Square Error of train {model} Model : ', mean_squared_error(y_train_reg, train_pred_))
+    print(f'accuracy train {model} Model : ', r2_score(y_train_reg, train_pred_))
     print(f'Mean Square Error of test {model} Model : ', mean_squared_error(y_test_reg, test_pred_))
+    print(f'accuracy  test {model} Model : ', r2_score(y_test_reg, test_pred_))
+
+
+
+
+
+classification_data = pd.read_csv("datasets/games-classification-dataset.csv")
+classification_data = classification_data.dropna(axis=0, how="any", subset="Rate", inplace=False)
+Y_class = classification_data["Rate"]
+drop_cols.remove('Average User Rating')
+X_class = classification_data.drop(columns=drop_cols + ['Rate'])
+
+X_train_class, X_test_class, y_train_class, y_test_class = train_test_split(X_class, Y_class, test_size=0.20, shuffle=True, random_state=10)
+
+X_train_classification = task_type(X_train_class, Y_train=y_train_class, type_technique=task[1], type_data='train', dict=preprocessing_dict,Numerical_cols=Numerical_cols)
+X_test_classification = task_type(X_test_class, type_technique=task[1], type_data='test', dict=preprocessing_dict,Numerical_cols=Numerical_cols)
+
