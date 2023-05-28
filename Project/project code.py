@@ -1,17 +1,26 @@
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import Lasso, LinearRegression, Ridge
+from sklearn.model_selection import train_test_split,GridSearchCV,KFold
+from sklearn.linear_model import RidgeCV,LinearRegression
 import numpy as np
 import datetime as dt
 import pandas as pd
 from scipy.stats import zscore
 from sklearn.feature_selection import SelectKBest, f_regression, f_classif, mutual_info_classif
-from sklearn.metrics import mean_squared_error,r2_score
 import seaborn as sns
-from sklearn.svm import SVR
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.tree import DecisionTreeClassifier
 import matplotlib.pyplot as plt
 import pickle
 import os
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error,r2_score,accuracy_score
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+import time
+import warnings
+
+warnings.filterwarnings("ignore")
+
+
 
 paths = ["preprocessing/", "models/"]
 for path in paths:
@@ -41,7 +50,7 @@ def visualize_data(y, x, columnx, columny):
 
 
 # draw distribution of column based on another column
-def draw_distribution(X, Y, column_x, column_y):
+def distribution(X, Y, column_x, column_y):
     df = pd.DataFrame(X[column_x])
     df[column_y] = Y
     df.groupby(column_x)[column_y].plot(kind='kde')
@@ -87,16 +96,18 @@ def replace_null_values(X, type='train'):
         Genres = X['Genres'].str.split(', ').explode()
         frequent_Genres = Genres.value_counts(normalize=True, dropna=True)
 
-        Null_values_columns['Languages'] = ', '.join(frequent_languages.index[:3].tolist())
-        Null_values_columns['Genres'] = ', '.join(frequent_Genres.index[:3].tolist())
+        Null_values_columns['Languages'] = ', '.join(frequent_languages.index[:1].tolist())
+        Null_values_columns['Genres'] = ', '.join(frequent_Genres.index[:1].tolist())
         Null_values_columns['Age Rating'] = X['Age Rating'].value_counts().idxmax()
         Null_values_columns['User Rating Count'] = int(X["User Rating Count"].mode())
         Null_values_columns['Price'] = int(X["Price"].mode())
         Null_values_columns['Original Release Date'] = int(X['Original Release Date'].mean())
         Null_values_columns['Current Version Release Date'] = int(X['Current Version Release Date'].mean())
+        Null_values_columns['Size'] = int(X['Size'].mean())
         preprocessing_dict['Null values columns'] = Null_values_columns
 
     X['Languages'] = X['Languages'].fillna(Null_values_columns['Languages'])
+    X['Size'] = X['Size'].fillna(X['Size'].mean())
     X['Genres'] = X['Genres'].fillna(Null_values_columns['Genres'])
     X['Age Rating'] = X['Age Rating'].fillna(Null_values_columns['Age Rating'])
     X['User Rating Count'] = X['User Rating Count'].fillna(Null_values_columns['User Rating Count'])
@@ -139,9 +150,10 @@ def one_hot_encoding(X, type='train'):
 # Apply Feature Scaling
 def features_scaling(X, cols, type='train'):
     if type == 'train':
-        scaler = StandardScaler()
+        scaler = MinMaxScaler(feature_range=(0, 1))
         scaler_model = scaler.fit(X[cols])
         scaled_data = scaler_model.transform(X[cols])
+        save_parameter (f'{paths[0]}cols_scalr', scaler_model)
         save_parameter(f'{paths[0]}scaler_model', scaler_model)
     else:
         scaler_model = load_parameter(f'{paths[0]}scaler_model')
@@ -153,7 +165,7 @@ def features_scaling(X, cols, type='train'):
 
     return X
 
-def anova(X_features, Y_train=None, type=f_regression, K=34):
+def anova(X_features, Y_train=None, type=f_regression, K=None):
     # Anova
     selected_cols = np.std(X_features, axis=0) != 0  # get columns that have zero standard deviation
     X_features = X_features[
@@ -206,13 +218,13 @@ def features_selection_regression(X, y_train=None, type='train', numerical_featu
     return X
 
 # Apply Classification features selection using Anova and Mutual information on data
-def features_selection_classification(X, y_train=None, type='train', numerical_features=None, categorical_features=None, K_anova=3, K_mut=34):
+def features_selection_classification(X, y_train=None, type='train', numerical_features=None, categorical_features=None):
     if type == 'train':
         # Anova
-        anova_cols = anova(numerical_features, Y_train=y_train,type=f_classif, K=K_anova)
+        anova_cols = anova(numerical_features, Y_train=y_train,type=f_classif, K=4)
 
         # Mutual information
-        selector = SelectKBest(score_func=mutual_info_classif, k=K_mut)
+        selector = SelectKBest(score_func=mutual_info_classif, k=34)
         selector.fit_transform(categorical_features, y_train)
         selected_cols = selector.get_support(indices=True)                               # get indices of selection columns
         mutual_cols = (categorical_features.columns[selected_cols]).tolist()
@@ -261,6 +273,13 @@ def task_type(X, Y_train=None, type_technique='regression', type_data='train', d
 
     return X
 
+def get_labels(data):
+    Labels = {'Low': 1, 'Intermediate': 2, 'High': 3}
+    result = []
+    for i in data:
+        result.append(Labels[i])
+    return result
+
 
 # Preprocessing Dictionary
 preprocessing_dict = {}
@@ -292,75 +311,203 @@ preprocessing_dict['drop columns'] = drop_cols          # Add drop columns to pr
 # Drop some columns from data
 X_reg = regression_data.drop(columns=drop_cols)
 Numerical_cols = X_reg.select_dtypes(exclude=['object']).columns.tolist() +['Original Release Date','Current Version Release Date']
+save_parameter(f'{paths[0]}Numerical_cols', Numerical_cols)
+
+# visualization of some columns based on target column
+visualize_data(Y_reg,X_reg,'User Rating Count','Average User Rating')
+visualize_data(Y_reg,X_reg,'Age Rating','Average User Rating')
+distribution(X_reg,Y_reg,'Age Rating','Average User Rating')
+visualize_data(Y_reg,X_reg ,'Price','Average User Rating')
 
 
-# # visualization of some columns based on target column
-# visualize_data(Y,X,'User Rating Count','Average User Rating')
-# visualize_data(Y,X,'Age Rating','Average User Rating')
-# draw_distribution(X,Y,'Age Rating','Average User Rating')
-# visualize_data(Y,X ,'Price','Average User Rating')
-
-
-# # Visualizing the relationships between features
-# sns.pairplot(data = X.join(Y), height = 20)
+# Visualizing the relationships between features
+sns.pairplot(data = X_reg.join(Y_reg), height = 20)
 
 
 
 # Spilt data into train and test
-X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(X_reg, Y_reg, test_size=0.20, shuffle=True, random_state=8)
+X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(X_reg, Y_reg, test_size=0.20, shuffle=True, random_state=12)
 
 task = ['regression', 'classification']
 
 # Apply preprocessing in train and test data
 X_train_reg = task_type(X_train_reg, Y_train=y_train_reg, type_technique=task[0], type_data='train',
                         dict=preprocessing_dict, Numerical_cols=Numerical_cols)
-X_test_reg = task_type(X_test_reg, type_technique=task[0], type_data='test', dict=preprocessing_dict, Numerical_cols=Numerical_cols)
 
-# from sklearn.preprocessing import StandardScaler, PolynomialFeatures
-# poly_features = PolynomialFeatures(degree=3)
-# X_train_poly = poly_features.fit_transform(X_train_reg)
-# poly_model = LinearRegression()
-# poly_model.fit(X_train_poly, y_train_reg)
-#
-# y_train_predicted = poly_model.predict(X_train_poly)
-#
-# y_predict = poly_model.predict(poly_features.transform(X_test_reg))
-# print('Mean Square Error Train', r2_score(y_train_reg, y_train_predicted))
-# print('Mean Square Error Test', r2_score(y_test_reg, y_predict))
+X_test_reg = task_type(X_test_reg, type_technique=task[0], type_data='test',
+                       dict=preprocessing_dict, Numerical_cols=Numerical_cols)
 
 
-# Apply some models
-svr = SVR(kernel='rbf')
-lasso = Lasso(alpha=0.1)
-linear = LinearRegression()
-ridge = Ridge(alpha=0.1)
 
-models = [svr, lasso, linear, ridge]
+
+# RandomForestRegressor
+RF = RandomForestRegressor()
+RF.fit(X_train_reg, y_train_reg)
+
+# Ridge Regression Model
+fold = KFold(n_splits=5)
+ridge_model = RidgeCV(alphas=[0.0001, 0.001, 0.01, 0.1, 1, 10], cv=fold)
+ridge_model.fit(X_train_reg, y_train_reg)
+
+# LinearRegression
+linear_model = LinearRegression()
+linear_model.fit(X_train_reg, y_train_reg)
+
+models = {"RandomForestRegressor":RF, 'Ridge':ridge_model, "LinearRegression":linear_model}
 
 for name in models:
-    model = name.fit(X_train_reg, y_train_reg)
-    save_parameter(f'{paths[1]}{model}', model)
+    model = models[name].fit(X_train_reg, y_train_reg)
+    save_parameter(f'{paths[1]}{name}', model)
     train_pred_ = model.predict(X_train_reg)
     test_pred_ = model.predict(X_test_reg)
-    plot(y_train_reg, train_pred_, str(model))
-    plot(y_test_reg, test_pred_, str(model))
-    print(f'Mean Square Error of train {model} Model : ', mean_squared_error(y_train_reg, train_pred_))
-    print(f'accuracy train {model} Model : ', r2_score(y_train_reg, train_pred_))
-    print(f'Mean Square Error of test {model} Model : ', mean_squared_error(y_test_reg, test_pred_))
-    print(f'accuracy  test {model} Model : ', r2_score(y_test_reg, test_pred_))
-
-
-
-
+    plot(y_train_reg, train_pred_, str(name))
+    plot(y_test_reg, test_pred_, str(name))
+    print(f"----------------------------{name} model----------------------------------\n")
+    print(f'Mean Square Error of train {name} Model : ', mean_squared_error(y_train_reg, train_pred_))
+    print(f'Mean Square Error of test {name} Model : ', mean_squared_error (y_test_reg, test_pred_))
+    print(f'R2 Score train {name} Model : ', r2_score(y_train_reg, train_pred_))
+    print(f'R2 Score  test {name} Model : ', r2_score(y_test_reg, test_pred_))
+    print("\n")
 
 classification_data = pd.read_csv("datasets/games-classification-dataset.csv")
 classification_data = classification_data.dropna(axis=0, how="any", subset="Rate", inplace=False)
-Y_class = classification_data["Rate"]
+Y_class = get_labels(classification_data["Rate"].tolist())
 drop_cols.remove('Average User Rating')
 X_class = classification_data.drop(columns=drop_cols + ['Rate'])
 
+
 X_train_class, X_test_class, y_train_class, y_test_class = train_test_split(X_class, Y_class, test_size=0.20, shuffle=True, random_state=10)
 
-X_train_classification = task_type(X_train_class, Y_train=y_train_class, type_technique=task[1], type_data='train', dict=preprocessing_dict,Numerical_cols=Numerical_cols)
-X_test_classification = task_type(X_test_class, type_technique=task[1], type_data='test', dict=preprocessing_dict,Numerical_cols=Numerical_cols)
+X_train_class = task_type(X_train_class, Y_train=y_train_class, type_technique=task[1], type_data='train', dict=preprocessing_dict,Numerical_cols=Numerical_cols)
+X_test_class = task_type(X_test_class, type_technique=task[1], type_data='test', dict=preprocessing_dict,Numerical_cols=Numerical_cols)
 
+
+scores_list = []
+n_neighbors_list = [2,5,10,20,30,40,50,60,70,80,90,100,120,140,180,200]
+for n_neighbors_value in n_neighbors_list:
+    knn = KNeighborsClassifier(n_neighbors=n_neighbors_value)
+    knn.fit(X_train_class, y_train_class)
+    scores_list.append(knn.score(X_test_class, y_test_class))
+
+fig, ax = plt.subplots()
+ax = sns.lineplot(x=n_neighbors_list, y=scores_list, color="red")
+ax.set(xlabel="number neighbors", ylabel="Score Model")
+plt.title("KNN Model Score with neighbors hyperparameter", fontsize=16)
+plt.show()
+training_time = []
+testing_time =[]
+accuracy = []
+
+# KNN classifier
+param_grid = {
+    'n_neighbors': [2,5,10,20,30,40,50,60,70,80,90,100,120,140,180,200],
+    'metric': ['euclidean', 'manhattan']
+}
+kNN = KNeighborsClassifier()
+
+grid_search = GridSearchCV(kNN, param_grid, cv=5)
+grid_search.fit(X_train_class, y_train_class)
+
+best_params_knn = grid_search.best_params_
+print(best_params_knn)
+knn = KNeighborsClassifier(**best_params_knn)
+start_time_train = time.time()
+knn.fit(X_train_class, y_train_class)
+end_time_train = time.time()
+training_time.append(end_time_train-start_time_train)
+
+save_parameter(f'{paths[1]}{knn}_model', knn)
+start_time_testing = time.time()
+y_pred = knn.predict(X_test_class)
+end_time_testing = time.time()
+testing_time.append(end_time_testing-start_time_testing)
+knn_accuracy = accuracy_score(y_test_class, y_pred)
+print('KNN Testing Accuracy:', knn_accuracy)
+accuracy.append(knn_accuracy)
+
+
+
+# SVM classifier
+# Hyperparameter Tuning
+param_grid = {'C': [0.1, 1,5, 10], 'kernel': ['linear', 'rbf']}
+svm = SVC()
+grid_search = GridSearchCV(svm, param_grid, cv=5)
+grid_search.fit(X_train_class, y_train_class)
+
+best_params = grid_search.best_params_
+print(best_params)
+svm = SVC(**best_params)
+
+# Model Training and Evaluation
+start_time_train = time.time()
+svm.fit(X_train_class, y_train_class)
+end_time_train = time.time()
+training_time.append(end_time_train-start_time_train)
+save_parameter(f'{paths[1]}{svm}_model', svm)
+
+start_time_testing = time.time()
+y_pred = svm.predict(X_test_class)
+end_time_testing = time.time()
+testing_time.append(end_time_testing-start_time_testing)
+
+svm_accuracy = accuracy_score(y_test_class, y_pred)
+print('SVM Testing Accuracy:', svm_accuracy)
+accuracy.append(svm_accuracy)
+
+# DecisionTree Classifier
+param_grid = {
+    'criterion': ['gini', 'entropy'],
+    'max_depth': [2, 4, 6, 8, 10,12,14,16,18,20 ,None]
+}
+
+decision_tree = DecisionTreeClassifier()
+
+# Perform grid search with cross-validation
+grid_search = GridSearchCV(decision_tree, param_grid, cv=5)
+grid_search.fit(X_train_class, y_train_class)
+
+best_params = grid_search.best_params_
+print(best_params)
+decision_tree = DecisionTreeClassifier(**best_params)
+
+start_time_train = time.time()
+decision_tree.fit(X_train_class, y_train_class)
+end_time_train = time.time()
+training_time.append(end_time_train-start_time_train)
+
+save_parameter(f'{paths[1]}{decision_tree}_model', svm)
+
+start_time_testing = time.time()
+y_pred = decision_tree.predict(X_test_class)
+end_time_testing = time.time()
+testing_time.append(end_time_testing-start_time_testing)
+
+decision_tree_accuracy = accuracy_score(y_test_class, y_pred)
+print('Decision tree Testing Accuracy:', decision_tree_accuracy)
+accuracy.append(decision_tree_accuracy)
+
+
+
+plt.figure(figsize=(10, 5))
+
+plt.subplot(1, 3, 1)
+plt.bar(range(len(accuracy)), accuracy)
+plt.xlabel('Models')
+plt.ylabel('Accuracy')
+plt.title('Classification Accuracy')
+
+plt.subplot(1, 3, 2)
+plt.bar(range(len(training_time)), training_time)
+plt.xlabel('Models')
+plt.ylabel('Time (minutes)')
+plt.title('Total Training Time')
+
+plt.subplot(1, 3, 3)
+plt.bar(range(len(testing_time)), testing_time)
+plt.xlabel('Models')
+plt.ylabel('Time (minutes)')
+plt.title('Total Test Time')
+
+# Show the bar graphs
+plt.tight_layout()
+plt.show()
